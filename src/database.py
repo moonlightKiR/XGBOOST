@@ -22,14 +22,18 @@ def initialize_database():
     CREATE TABLE IF NOT EXISTS drawings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         category TEXT,
-        data BLOB
+        data BLOB,
+        label TEXT,
+        recognized INTEGER,
+        key_id TEXT,
+        countrycode TEXT
     )
     ''')
     conn.commit()
     conn.close()
 
 def download_data():
-    categories = ['apple', 'banana', 'cactus', 'broom', 'bicycle']
+    categories = ['apple', 'banana', 'cactus', 'broom', 'bicycle', 'dragon']
     base_url = "https://storage.googleapis.com/quickdraw_dataset/full/numpy_bitmap/"
     
     if not os.path.exists(DOWNLOAD_DIR):
