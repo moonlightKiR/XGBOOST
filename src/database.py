@@ -23,17 +23,14 @@ def initialize_database():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         category TEXT,
         data BLOB,
-        label TEXT,
-        recognized INTEGER,
-        key_id TEXT,
-        countrycode TEXT
+        recognized INTEGER
     )
     ''')
     conn.commit()
     conn.close()
 
 def download_data():
-    categories = ['apple', 'banana', 'cactus', 'broom', 'bicycle', 'dragon']
+    categories = ['dragon'] # 'apple', 'banana', 'cactus', 'broom', 'bicycle', 
     base_url = "https://storage.googleapis.com/quickdraw_dataset/full/numpy_bitmap/"
     
     if not os.path.exists(DOWNLOAD_DIR):
@@ -67,7 +64,10 @@ def upload_to_db(categories, limit=5000):
             data = np.load(path)
             data = data[:limit]
             for img in tqdm(data, desc=f"Subiendo {category}"):
-                cursor.execute("INSERT INTO drawings (category, data) VALUES (?, ?)", (category, img.tobytes()))
+                cursor.execute("""
+                    INSERT INTO drawings (category, data, recognized) 
+                    VALUES (?, ?, ?)
+                """, (category, img.tobytes(), 1))
     
     conn.commit()
     conn.close()
@@ -75,10 +75,10 @@ def upload_to_db(categories, limit=5000):
 
 def get_dataframe():
     conn = sqlite3.connect(DATABASE_PATH)
-    query = "SELECT id, category, data FROM drawings"
+    query = "SELECT id, category, data, recognized FROM drawings"
     df = pd.read_sql_query(query, conn)
     
-    df['drawing'] = df['data'].apply(lambda x: np.frombuffer(x, dtype=np.uint8).reshape(28, 28))
+    # df['drawing'] = df['data'].apply(lambda x: np.frombuffer(x, dtype=np.uint8).reshape(28, 28))
     
     conn.close()
     return df
