@@ -2,6 +2,7 @@ import os
 import numpy as np
 import sqlite3
 import requests
+import pandas as pd
 from tqdm import tqdm
 
 # Definición de rutas: la base de datos estará en XGBOOST/database/
@@ -67,3 +68,13 @@ def upload_to_db(categories, limit=5000):
     conn.commit()
     conn.close()
     print(f"Todo listo. Base de datos en: {DATABASE_PATH}")
+
+def get_dataframe():
+    conn = sqlite3.connect(DATABASE_PATH)
+    query = "SELECT id, category, data FROM drawings"
+    df = pd.read_sql_query(query, conn)
+    
+    df['drawing'] = df['data'].apply(lambda x: np.frombuffer(x, dtype=np.uint8).reshape(28, 28))
+    
+    conn.close()
+    return df
