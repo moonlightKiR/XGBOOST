@@ -404,11 +404,16 @@ def identify_low_ink_drawings(df, quantile=0, n_to_show=10, pixel_prefix='px_'):
     print(f"Umbral mínimo de tinta (q={quantile}): {threshold}")
     print(f"Cantidad de dibujos sospechosos de estar vacíos: {len(outliers)}")
     
-    if len(outliers) > 0 and 'recognized' in df.columns:
-        rec_val = outliers['recognized'].value_counts(normalize=True) * 100
-        print("Distribución de 'recognized' en estos dibujos:")
-        for val, perc in rec_val.items():
-            print(f"  - {val}: {perc:.2f}%")
+    if len(outliers) > 0:
+        if 'category' in outliers.columns:
+            print("Conteo de categorías en dibujos con poca tinta:")
+            print(outliers['category'].value_counts())
+
+        if 'recognized' in df.columns:
+            rec_val = outliers['recognized'].value_counts(normalize=True) * 100
+            print("\nDistribución de 'recognized' en estos dibujos:")
+            for val, perc in rec_val.items():
+                print(f"  - {val}: {perc:.2f}%")
             
     if len(outliers) > 0:
         # Determinar forma dinámica para las imágenes
@@ -428,50 +433,73 @@ def identify_low_ink_drawings(df, quantile=0, n_to_show=10, pixel_prefix='px_'):
         # 1. Crear Heatmap Superpuesto (Promedio de todos los outliers)
         avg_outlier_img = outliers[pixel_cols].mean(axis=0).values.astype(float).reshape(image_shape)
 
-        # 2. Visualización
-        n_samples = min(len(outliers), n_to_show)
-        fig = plt.figure(figsize=(15, 5))
-        gs = fig.add_gridspec(1, 2, width_ratios=[1, 2])
-
-        # Subplot A: Heatmap Superpuesto
-        ax0 = fig.add_subplot(gs[0])
-        im0 = ax0.imshow(avg_outlier_img, cmap='magma')
-        title_text = f"Heatmap Superpuesto\n(Media de {len(outliers)} dibujos)"
-        ax0.set_title(title_text)
-        plt.colorbar(im0, ax=ax0)
-        ax0.axis('off')
-
-        # Subplot B: Muestras Individuales
-        ax1 = fig.add_subplot(gs[1])
-        ax1.set_title("Muestras Individuales con poca tinta")
-        ax1.axis('off')
-        
-        # Crear sub-ejes internos para las muestras
-        inner_gs = gs[1].subgridspec(1, n_samples)
-        for i in range(n_samples):
-            ax_img = fig.add_subplot(inner_gs[i])
-            img_data = outliers.iloc[i][pixel_cols].values.astype(float).reshape(image_shape)
-            ax_img.imshow(img_data, cmap='gray_r', vmin=0, vmax=255)
-            
-            # Título con info de tinta y reconocido
-            ink_val = ink_sum.loc[outliers.index[i]]
-            title = f"Ink: {ink_val:.0f}"
-            if 'recognized' in outliers.columns:
-                rec = outliers.iloc[i]['recognized']
-                title += f"\nRec: {rec}"
-                
-            ax_img.set_title(title, fontsize=8)
-            ax_img.axis('off')
-
+        # 2. Visualización: Solo Heatmap Superpuesto
+        plt.figure(figsize=(8, 6))
+        im0 = plt.imshow(avg_outlier_img, cmap='magma')
+        plt.title(f"Heatmap Acumulado (Superpuesto)\nMedia de {len(outliers)} dibujos con poca tinta")
+        plt.colorbar(im0, label='Intensidad Media')
+        plt.axis('off')
         plt.tight_layout()
         plt.show()
         
     return outliers.index
+
+def plot_all_deleted_drawings(df, indices, pixel_prefix='px_'):
+    """
+    Visualiza todos los dibujos que han sido seleccionados para ser eliminados.
+    """
+    if len(indices) == 0:
+        return
+
+    outliers = df.loc[indices]
+    pixel_cols = [c for c in df.columns if c.startswith(pixel_prefix)]
+    
+    n_pixels = len(pixel_cols)
+    side = int(math.sqrt(n_pixels))
+    if side * side == n_pixels:
+        image_shape = (side, side)
+    else:
+        # Fallback rectangular
+        image_shape = (1, n_pixels)
+        for s in range(side, 1, -1):
+            if n_pixels % s == 0:
+                image_shape = (s, n_pixels // s)
+                break
+
+    n_drawings = len(outliers)
+    cols = 10
+    rows = math.ceil(n_drawings / cols)
+    
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 1.5, rows * 2))
+    axes = np.array(axes).flatten()
+    
+    for i in range(len(axes)):
+        if i < n_drawings:
+            img_data = outliers.iloc[i][pixel_cols].values.astype(float).reshape(image_shape)
+            axes[i].imshow(img_data, cmap='gray_r', vmin=0, vmax=255)
+            
+            # Info básica
+            cat = outliers.iloc[i].get('category', 'N/A')
+            ink = outliers.iloc[i][pixel_cols].sum()
+            axes[i].set_title(f"{cat}\nInk:{ink:.0f}", fontsize=7)
+            axes[i].axis('off')
+        else:
+            axes[i].axis('off')
+            
+    plt.suptitle(f"Revisión de todos los dibujos a eliminar (n={n_drawings})", fontsize=16, y=1.02)
+    plt.tight_layout()
+    plt.show()
 
 def drop_low_ink_drawings(df, quantile=0, pixel_prefix='px_'):
     """
     Elimina los dibujos con poca tinta del DataFrame.
     """
     low_ink_indices = identify_low_ink_drawings(df, quantile=quantile, pixel_prefix=pixel_prefix)
+    
+    if len(low_ink_indices) > 0:
+        print(f"\nMostrando revisión completa de los {len(low_ink_indices)} dibujos seleccionados...")
+        plot_all_deleted_drawings(df, low_ink_indices, pixel_prefix=pixel_prefix)
+    
     df_filtered = df.drop(low_ink_indices)
+    print(f"Eliminados {len(low_ink_indices)} dibujos. Filas restantes: {len(df_filtered)}")
     return df_filtered
