@@ -8,6 +8,7 @@ import scipy.stats as stats
 import matplotlib.pyplot as plt
 import seaborn as sns
 import umap
+
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.feature_selection import mutual_info_classif
@@ -33,7 +34,7 @@ def transform_dataframe(df, binary_col='data'):
     
     # 2. Generación de nombres de columnas
     n_pixels = pixel_matrix.shape[1]
-    pixel_cols = [f'pixel_{i}' for i in range(n_pixels)]
+    pixel_cols = [f'px_{i}' for i in range(n_pixels)]
     
     # 3. Creación del DataFrame de píxeles
     df_pixels = pd.DataFrame(pixel_matrix, columns=pixel_cols, index=df.index)
@@ -123,7 +124,7 @@ def plot_class_balance(df, columns=['category', 'recognized']):
     plt.tight_layout()
     plt.show()
 
-def plot_average_images(df, pixel_prefix='pixel_', image_shape=(28, 28)):
+def plot_average_images(df, pixel_prefix='px_', image_shape=(28, 28)):
     """
     Calcula y visualiza la 'imagen promedio' para cada categoría.
     Esto ayuda a entender si las clases tienen una estructura espacial consistente.
@@ -161,7 +162,7 @@ def plot_average_images(df, pixel_prefix='pixel_', image_shape=(28, 28)):
     plt.show()
 
 
-def analyze_complexity(df, pixel_prefix='pixel_'):
+def analyze_complexity(df, pixel_prefix='px_'):
     """
     Calcula la 'suma de tinta' por imagen y la compara entre categorías 
     usando Boxplots. Ayuda a distinguir clases simples de complejas.
@@ -194,7 +195,7 @@ def analyze_complexity(df, pixel_prefix='pixel_'):
     print(stats)
 
 
-def test_complexity_significance(df, category_col='category', pixel_prefix='pixel_'):
+def test_complexity_significance(df, category_col='category', pixel_prefix='px_'):
     """
     Calcula internamente la complejidad (suma de tinta) y realiza un ANOVA 
     para ver si las diferencias entre categorías son significativas.
@@ -240,7 +241,7 @@ def center_image_by_mass(img_flat, image_shape=(28, 28)):
 
     return img_shifted.flatten()
 
-def preprocess_center_images(df, pixel_prefix='pixel_'):
+def preprocess_center_images(df, pixel_prefix='px_'):
     """
     Aplica el centrado por centro de masa a todas las imágenes del DataFrame.
     
@@ -265,7 +266,7 @@ def preprocess_center_images(df, pixel_prefix='pixel_'):
     print("Proceso finalizado.")
     return df_centered
 
-def plot_pixel_variance_heatmap(df, pixel_prefix='pixel_', image_shape=(28, 28)):
+def plot_pixel_variance_heatmap(df, pixel_prefix='px_', image_shape=(28, 28)):
     """
     Calcula la desviación estándar de cada píxel y la visualiza como un mapa de calor.
     Ayuda a identificar qué zonas de la imagen contienen información (alta varianza)
@@ -296,7 +297,7 @@ def plot_pixel_variance_heatmap(df, pixel_prefix='pixel_', image_shape=(28, 28))
 
 
 ##Ultimo paso del EDA
-def remove_low_variance_pixels(df, pixel_prefix='pixel_', threshold=0.0):
+def remove_low_variance_pixels(df, pixel_prefix='px_', threshold=0.0):
     """
     Elimina las columnas de píxeles cuya desviación estándar sea menor o igual al umbral.
     Reduce la dimensionalidad del dataset eliminando zonas muertas.
@@ -321,11 +322,11 @@ def remove_low_variance_pixels(df, pixel_prefix='pixel_', threshold=0.0):
     # 3. Filtrar el DataFrame
     metadata_cols = [c for c in df.columns if c not in pixel_cols]
     final_cols = metadata_cols + cols_to_keep
-    
+    print(f"Columnas finales: {len(cols_to_keep)}")
     df_reduced = df[final_cols].copy()
     return df_reduced
 
-def visualize_umap_projection(df, pixel_prefix='pixel_', n_samples=None, n_neighbors=15, min_dist=0.1):
+def visualize_umap_projection(df, pixel_prefix='px_', n_samples=None, n_neighbors=15, min_dist=0.1):
     """
     Aplica UMAP para reducir la dimensionalidad de los píxeles a 2D y visualiza
     si las clases son separables espacialmente.
@@ -381,3 +382,96 @@ def visualize_umap_projection(df, pixel_prefix='pixel_', n_samples=None, n_neigh
     
     plt.tight_layout()
     plt.show()
+
+def identify_low_ink_drawings(df, quantile=0, n_to_show=10, pixel_prefix='px_'):
+    """
+    Identifica dibujos con poca tinta y visualiza un heatmap promedio (superpuesto)
+    y muestras individuales.
+    """
+    import math
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    pixel_cols = [c for c in df.columns if c.startswith(pixel_prefix)]
+    if not pixel_cols:
+        print("Error: No se encontraron columnas de píxeles.")
+        return
+        
+    ink_sum = df[pixel_cols].sum(axis=1)
+    threshold = ink_sum.quantile(quantile)
+    
+    outliers = df[ink_sum < threshold]
+    print(f"Umbral mínimo de tinta (q={quantile}): {threshold}")
+    print(f"Cantidad de dibujos sospechosos de estar vacíos: {len(outliers)}")
+    
+    if len(outliers) > 0 and 'recognized' in df.columns:
+        rec_val = outliers['recognized'].value_counts(normalize=True) * 100
+        print("Distribución de 'recognized' en estos dibujos:")
+        for val, perc in rec_val.items():
+            print(f"  - {val}: {perc:.2f}%")
+            
+    if len(outliers) > 0:
+        # Determinar forma dinámica para las imágenes
+        n_pixels = len(pixel_cols)
+        side = int(math.sqrt(n_pixels))
+        if side * side == n_pixels:
+            image_shape = (side, side)
+        else:
+            found = False
+            for s in range(side, 1, -1):
+                if n_pixels % s == 0:
+                    image_shape = (s, n_pixels // s)
+                    found = True
+                    break
+            if not found: image_shape = (1, n_pixels)
+
+        # 1. Crear Heatmap Superpuesto (Promedio de todos los outliers)
+        avg_outlier_img = outliers[pixel_cols].mean(axis=0).values.astype(float).reshape(image_shape)
+
+        # 2. Visualización
+        n_samples = min(len(outliers), n_to_show)
+        fig = plt.figure(figsize=(15, 5))
+        gs = fig.add_gridspec(1, 2, width_ratios=[1, 2])
+
+        # Subplot A: Heatmap Superpuesto
+        ax0 = fig.add_subplot(gs[0])
+        im0 = ax0.imshow(avg_outlier_img, cmap='magma')
+        title_text = f"Heatmap Superpuesto\n(Media de {len(outliers)} dibujos)"
+        ax0.set_title(title_text)
+        plt.colorbar(im0, ax=ax0)
+        ax0.axis('off')
+
+        # Subplot B: Muestras Individuales
+        ax1 = fig.add_subplot(gs[1])
+        ax1.set_title("Muestras Individuales con poca tinta")
+        ax1.axis('off')
+        
+        # Crear sub-ejes internos para las muestras
+        inner_gs = gs[1].subgridspec(1, n_samples)
+        for i in range(n_samples):
+            ax_img = fig.add_subplot(inner_gs[i])
+            img_data = outliers.iloc[i][pixel_cols].values.astype(float).reshape(image_shape)
+            ax_img.imshow(img_data, cmap='gray_r', vmin=0, vmax=255)
+            
+            # Título con info de tinta y reconocido
+            ink_val = ink_sum.loc[outliers.index[i]]
+            title = f"Ink: {ink_val:.0f}"
+            if 'recognized' in outliers.columns:
+                rec = outliers.iloc[i]['recognized']
+                title += f"\nRec: {rec}"
+                
+            ax_img.set_title(title, fontsize=8)
+            ax_img.axis('off')
+
+        plt.tight_layout()
+        plt.show()
+        
+    return outliers.index
+
+def drop_low_ink_drawings(df, quantile=0, pixel_prefix='px_'):
+    """
+    Elimina los dibujos con poca tinta del DataFrame.
+    """
+    low_ink_indices = identify_low_ink_drawings(df, quantile=quantile, pixel_prefix=pixel_prefix)
+    df_filtered = df.drop(low_ink_indices)
+    return df_filtered
