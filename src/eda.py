@@ -5,15 +5,16 @@ import warnings
 import pandas as pd
 import numpy as np
 import scipy.stats as stats
-
 import matplotlib.pyplot as plt
-
 import seaborn as sns
+import umap
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.feature_selection import mutual_info_classif
 from sklearn.decomposition import PCA
 from imblearn.over_sampling import SMOTE
+from scipy.ndimage import center_of_mass, shift
+from scipy.stats import f_oneway
 
 warnings.filterwarnings('ignore')
 """Funciones de EDA
@@ -24,10 +25,23 @@ Original file is located at
     https://colab.research.google.com/drive/1AMMgRD2LokngHhwgaeSibBbYBfD8xmGl
 """
 
-def transform_dataframe(df):
-    #Dividimos la variable data en 784 columnas referentes a cada pixel
-    df.drop('data', inplace= True)
-    return df 
+def transform_dataframe(df, binary_col='data'):
+    if binary_col not in df.columns:
+        print(f"La columna {binary_col} no existe.")
+        return df
+    pixel_matrix = np.array([list(b) for b in df[binary_col]], dtype=np.uint8)
+    
+    # 2. Generación de nombres de columnas
+    n_pixels = pixel_matrix.shape[1]
+    pixel_cols = [f'pixel_{i}' for i in range(n_pixels)]
+    
+    # 3. Creación del DataFrame de píxeles
+    df_pixels = pd.DataFrame(pixel_matrix, columns=pixel_cols, index=df.index)
+    print(f"Generadas {n_pixels} columnas de píxeles. Eliminando columna original '{binary_col}'...")
+    
+    # Usamos drop en el concat para devolver un objeto limpio
+    df_final = pd.concat([df.drop(columns=[binary_col]), df_pixels], axis=1)
+    return df_final
 
 def data_resume_info(df):
     print("--- Informacion General ---")
@@ -78,140 +92,292 @@ def outlier_impact_test(df):
     # Devolvemos tabla
     return pd.DataFrame(resultados).sort_values(by='Delta_STD_(%)', ascending=True)
 
-def graf_box_hist(df):
-    df_vis = df.select_dtypes(include='number')
-    cols = df_vis.columns
-    total_vars = len(cols)
-    if total_vars == 0:
-        print("No hay columnas numéricas para graficar.")
+def plot_class_balance(df, columns=['category', 'recognized']):
+    """
+    Genera gráficos de barras (countplots) para visualizar el balance de 
+    las clases y la variable de reconocimiento.
+    """
+    valid_cols = [c for c in columns if c in df.columns]
+    
+    if not valid_cols:
+        print("No se encontraron las columnas especificadas para graficar.")
         return
 
-    # --- 1. Histogramas ---
-    axes_hist = df_vis.hist(bins=20, figsize=(15, 10), edgecolor='black', grid=False)
-    axes_hist_flat = axes_hist.flatten()
-    for ax in axes_hist_flat:
-        col_name = ax.get_title()
-        if col_name in cols:
-            mean_val = df_vis[col_name].mean()
-            ax.axvline(mean_val, color='red', linestyle='--', linewidth=2, label=f'Media: {mean_val:.2f}')
-            ax.legend(fontsize='small')
-    plt.tight_layout()
-    plt.show()
+    n_cols = 2 
+    n_rows = math.ceil(len(valid_cols) / n_cols)
+    fig, axes = plt.subplots(nrows=n_rows, ncols=n_cols, 
+                             figsize=(15, 5 * n_rows))
+    axes_flat = axes.flatten() if len(valid_cols) > 1 else [axes]
 
-    # --- 2. Boxplots ---
-    cols_grid = 3
-    rows_needed = math.ceil(total_vars / cols_grid)
-    fig, axes_box = plt.subplots(nrows=rows_needed, ncols=cols_grid,
-                                 figsize=(15, 4 * rows_needed))
-    axes_box_flat = axes_box.flatten() if total_vars > 1 else [axes_box]
-    for i, col_name in enumerate(cols):
-        ax = axes_box_flat[i]
-        sns.boxplot(x=df_vis[col_name], ax=ax, color='skyblue')
-        ax.set_title(col_name, fontsize=10, fontweight='bold')
-        ax.set_xlabel('')
-    for j in range(i + 1, len(axes_box_flat)):
-        fig.delaxes(axes_box_flat[j])
-
-    plt.tight_layout()
-    plt.show()
-
-def plot_binary_bars(df, grid_cols=3, figsize_width=15):
-    binary_cols = [col for col in df.columns if df[col].nunique() == 2]
-    total_vars = len(binary_cols)
-
-    if total_vars == 0:
-        print("No se encontraron variables binarias.")
-        return
-
-    resumen_list = []
-    for col in binary_cols:
-        conteo = df[col].value_counts(normalize=True) * 100
-        fila = {'Variable': col}
-        for valor, porcentaje in conteo.items():
-            fila[f'Valor_{valor} (%)'] = round(porcentaje, 2)
-        resumen_list.append(fila)
-
-    df_resumen = pd.DataFrame(resumen_list).fillna(0)
-
-    cols_ordenadas = ['Variable'] + sorted([c for c in df_resumen.columns if c != 'Variable'])
-    df_resumen = df_resumen[cols_ordenadas]
-
-    print("--- Distribución Porcentual ---")
-    print(df_resumen.to_string(index=False))
-    print("-" * 30)
-
-    # --- 2. Generación de Gráficos ---
-    rows_needed = math.ceil(total_vars / grid_cols)
-    fig, axes = plt.subplots(nrows=rows_needed, ncols=grid_cols,
-                             figsize=(figsize_width, 4 * rows_needed))
-    axes_flat = axes.flatten() if total_vars > 1 else [axes]
-    for i, col in enumerate(binary_cols):
+    for i, col in enumerate(valid_cols):
         ax = axes_flat[i]
         sns.countplot(x=df[col], ax=ax, palette='viridis', edgecolor='black')
-        ax.set_title(col, fontsize=10, fontweight='bold')
+        ax.set_title(f'Distribución de: {col}', fontweight='bold')
+        ax.set_ylabel('Cantidad de Imágenes')
         ax.set_xlabel('')
-        ax.set_ylabel('Frecuencia')
         for container in ax.containers:
-            ax.bar_label(container)
-
+            ax.bar_label(container, fmt='%d')
     for j in range(i + 1, len(axes_flat)):
         fig.delaxes(axes_flat[j])
 
     plt.tight_layout()
     plt.show()
 
-def analyze_shapiro_qq(df, grid_cols=3, figsize_width=15):
-    numeric_cols = [c for c in df.select_dtypes(include='number').columns
-                    if df[c].nunique() > 2 and c != 'ID']
-
-    if not numeric_cols:
-        print("No hay variables numéricas continuas para analizar.")
+def plot_average_images(df, pixel_prefix='pixel_', image_shape=(28, 28)):
+    """
+    Calcula y visualiza la 'imagen promedio' para cada categoría.
+    Esto ayuda a entender si las clases tienen una estructura espacial consistente.
+    
+    Args:
+        df: DataFrame con los píxeles y la columna 'category'.
+        pixel_prefix: Prefijo de las columnas de píxeles.
+        image_shape: Tupla con las dimensiones de la imagen (alto, ancho).
+    """
+    # 1. Identificar columnas de píxeles y categorías únicas
+    pixel_cols = [c for c in df.columns if c.startswith(pixel_prefix)]
+    categories = df['category'].unique()
+    
+    if not pixel_cols:
+        print("No se encontraron columnas de píxeles.")
         return
 
-    # --- 1. Cálculo Único y Almacenamiento ---
-    analysis_results = []
+    n_cats = len(categories)
+    print(f"Generando imágenes promedio para {n_cats} categorías...")
 
-    for col in numeric_cols:
-        data_log = np.log1p(df[col].dropna())
-        stat, p_value = stats.shapiro(data_log)
-        analysis_results.append({
-            'Variable': col,
-            'W_Statistic': stat,
-            'P_Value': p_value,
-            'Data_Transformed': data_log
-        })
-    df_results = pd.DataFrame(analysis_results).drop(columns=['Data_Transformed'])
+    # 2. Configurar gráfico
+    fig, axes = plt.subplots(1, n_cats, figsize=(5 * n_cats, 5))
+    if n_cats == 1: axes = [axes] 
 
-    print("=== Shapiro-Wilk (Log-Transformed) - Global ===")
-    print(df_results.to_string(index=False))
-
-    # --- 3. Generación de Gráficos ---
-    total_vars = len(analysis_results)
-    rows_needed = math.ceil(total_vars / grid_cols)
-
-    fig, axes = plt.subplots(nrows=rows_needed, ncols=grid_cols,
-                             figsize=(figsize_width, 4 * rows_needed))
-
-    axes_flat = axes.flatten() if total_vars > 1 else [axes]
-
-    for i, res in enumerate(analysis_results):
-        ax = axes_flat[i]
-        col_name = res['Variable']
-        p_val = res['P_Value']
-        data_plot = res['Data_Transformed']
+    # 3. Iterar por categoría
+    for i, cat in enumerate(categories):
+        ax = axes[i]
+        mean_pixels = df[df['category'] == cat][pixel_cols].mean(axis=0).values
+        avg_image = mean_pixels.reshape(image_shape)
+        im = ax.imshow(avg_image, cmap='gray_r', vmin=0, vmax=255)
+        ax.set_title(f'{cat}', fontsize=14, fontweight='bold')
+        ax.axis('off')
+    fig.colorbar(im, ax=axes, orientation='vertical', fraction=0.02, pad=0.04)
+    plt.suptitle('Imágenes Promedio por Clase', fontsize=16)
+    plt.show()
 
 
-        stats.probplot(data_plot, dist="norm", plot=ax)
-        color_title = 'red' if p_val < 0.05 else 'green'
-        p_text = "< 0.001" if p_val < 0.001 else f"{p_val:.3f}"
+def analyze_complexity(df, pixel_prefix='pixel_'):
+    """
+    Calcula la 'suma de tinta' por imagen y la compara entre categorías 
+    usando Boxplots. Ayuda a distinguir clases simples de complejas.
+    """
+    pixel_cols = [c for c in df.columns if c.startswith(pixel_prefix)]
+    
+    if not pixel_cols:
+        print("No se encontraron columnas de píxeles.")
+        return
 
-        ax.set_title(f'{col_name}\nShapiro p-val: {p_text}',
-                     fontsize=10, fontweight='bold', color=color_title)
-        ax.set_xlabel('')
-        ax.set_ylabel('')
+    print("Calculando complejidad (suma de intensidades)...")
+    df_temp = df.copy()
+    df_temp['ink_sum'] = df_temp[pixel_cols].sum(axis=1)
 
-    for j in range(i + 1, len(axes_flat)):
-        fig.delaxes(axes_flat[j])
+    # Visualización
+    plt.figure(figsize=(10, 6))
+    
+    sns.boxplot(data=df_temp, x='category', y='ink_sum', palette='Set2')
+    
+    plt.title('Complejidad del Dibujo (Suma de Píxeles) por Categoría', fontsize=12, fontweight='bold')
+    plt.ylabel('Cantidad de Tinta (Suma de Intensidad)')
+    plt.xlabel('Categoría')
+    plt.grid(axis='y', linestyle='--', alpha=0.5)
+    plt.tight_layout()
+    plt.show()
 
+    # Estadísticas numéricas para confirmar la separación visual
+    print("--- Estadísticas de Complejidad ---")
+    stats = df_temp.groupby('category')['ink_sum'].describe()[['mean', 'std', 'min', '50%', 'max']]
+    print(stats)
+
+
+def test_complexity_significance(df, category_col='category', pixel_prefix='pixel_'):
+    """
+    Calcula internamente la complejidad (suma de tinta) y realiza un ANOVA 
+    para ver si las diferencias entre categorías son significativas.
+    
+    No requiere que exista ninguna columna previa de suma.
+    """
+    # 1. Identificar columnas de píxeles
+    pixel_cols = [c for c in df.columns if c.startswith(pixel_prefix)]
+    
+    if not pixel_cols:
+        print("Error: No se encontraron columnas de píxeles (pixel_0, pixel_1...) para calcular la tinta.")
+        return
+
+    print(f"Calculando complejidad sobre {len(pixel_cols)} píxeles para el test...")
+    ink_series = df[pixel_cols].sum(axis=1)
+    groups = []
+    unique_cats = df[category_col].unique()
+    
+    for cat in unique_cats:
+        values = ink_series[df[category_col] == cat].values
+        groups.append(values)
+    
+    # 4. Ejecutar ANOVA
+    stat, p_value = f_oneway(*groups)
+    
+    print(f"\n--- Resultado ANOVA (Diferencia de Medias en Cantidad de Tinta) ---")
+    print(f"Estadístico F: {stat:.2f}")
+    print(f"P-valor: {p_value:.4e}")
+
+
+def center_image_by_mass(img_flat, image_shape=(28, 28)):
+    """
+    Calcula el centro de masa y desplaza la imagen para centrarla.
+    """
+    img = img_flat.reshape(image_shape)
+    if np.sum(img) == 0:
+        return img_flat
+    
+    cy, cx = center_of_mass(img)
+    dy = (image_shape[0] / 2) - cy
+    dx = (image_shape[1] / 2) - cx
+    img_shifted = shift(img, [dy, dx], mode='constant', cval=0)
+
+    return img_shifted.flatten()
+
+def preprocess_center_images(df, pixel_prefix='pixel_'):
+    """
+    Aplica el centrado por centro de masa a todas las imágenes del DataFrame.
+    
+    Args:
+        df: DataFrame con las columnas de píxeles.
+        pixel_prefix: Prefijo para identificar columnas de píxeles.
+        
+    Returns:
+        pd.DataFrame: Copia del DataFrame con los píxeles centrados.
+    """
+    # 1. Identificar columnas
+    pixel_cols = [c for c in df.columns if c.startswith(pixel_prefix)]
+    if not pixel_cols:
+        print("No se encontraron columnas de píxeles.")
+        return df
+    print(f"Centrando {len(df)} imágenes. Esto puede tomar unos momentos...")
+    df_centered = df.copy()
+    pixel_data = df_centered[pixel_cols].values.astype(np.float32)
+    centered_data = np.apply_along_axis(center_image_by_mass, 1, pixel_data)
+    df_centered[pixel_cols] = np.clip(centered_data, 0, 255).astype(np.uint8)
+    
+    print("Proceso finalizado.")
+    return df_centered
+
+def plot_pixel_variance_heatmap(df, pixel_prefix='pixel_', image_shape=(28, 28)):
+    """
+    Calcula la desviación estándar de cada píxel y la visualiza como un mapa de calor.
+    Ayuda a identificar qué zonas de la imagen contienen información (alta varianza)
+    y cuáles son ruido o fondo estático (baja varianza).
+    """
+    pixel_cols = [c for c in df.columns if c.startswith(pixel_prefix)]
+    
+    if not pixel_cols:
+        print("Error: No se encontraron columnas de píxeles.")
+        return
+
+    print(f"Calculando varianza para {len(pixel_cols)} píxeles...")
+    
+    # 1. Calcular desviación estándar por columna (píxel)
+    pixel_std = df[pixel_cols].std()
+    
+    # 2. Reconstruir la forma de la imagen (28x28)
+    std_matrix = pixel_std.values.reshape(image_shape)
+    
+    # 3. Visualización
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(std_matrix, cmap='magma', cbar_kws={'label': 'Desviación Estándar'})
+    
+    plt.title('Mapa de Varianza de Píxeles', fontsize=14)
+    plt.axis('off') # Ocultar ejes X/Y para verlo como imagen
+    plt.show()
+
+
+
+##Ultimo paso del EDA
+def remove_low_variance_pixels(df, pixel_prefix='pixel_', threshold=0.0):
+    """
+    Elimina las columnas de píxeles cuya desviación estándar sea menor o igual al umbral.
+    Reduce la dimensionalidad del dataset eliminando zonas muertas.
+    
+    Args:
+        threshold: Desviación estándar mínima para mantener el píxel. 
+                   0.0 elimina solo píxeles totalmente muertos.
+                   5.0 elimina ruido de fondo.
+    """
+    pixel_cols = [c for c in df.columns if c.startswith(pixel_prefix)]
+    
+    print(f"Análisis de reducción de dimensionalidad (Threshold={threshold})...")
+    print(f"Columnas iniciales: {len(pixel_cols)}")
+    
+    # 1. Calcular desviación estándar
+    variances = df[pixel_cols].std()
+    
+    # 2. Identificar columnas a mantener (las que superan el umbral)
+    cols_to_keep = variances[variances > threshold].index.tolist()
+    cols_to_drop = variances[variances <= threshold].index.tolist()
+    
+    # 3. Filtrar el DataFrame
+    metadata_cols = [c for c in df.columns if c not in pixel_cols]
+    final_cols = metadata_cols + cols_to_keep
+    
+    df_reduced = df[final_cols].copy()
+    return df_reduced
+
+def visualize_umap_projection(df, pixel_prefix='pixel_', n_samples=None, n_neighbors=15, min_dist=0.1):
+    """
+    Aplica UMAP para reducir la dimensionalidad de los píxeles a 2D y visualiza
+    si las clases son separables espacialmente.
+    
+    Args:
+        df: DataFrame con píxeles y columna 'category'.
+        n_samples: (Opcional) Número de filas a usar si el dataset es muy grande.
+        n_neighbors: Parámetro de UMAP (equilibrio local/global). 
+                     Valores bajos (5-10) preservan estructura local.
+                     Valores altos (30-50) preservan estructura global.
+        min_dist: Distancia mínima entre puntos en la proyección.
+    """
+    pixel_cols = [c for c in df.columns if c.startswith(pixel_prefix)]
+    
+    if not pixel_cols:
+        print("No se encontraron columnas de píxeles.")
+        return
+
+    # 1. Muestreo (Opcional para velocidad)
+    if n_samples and n_samples < len(df):
+        print(f"Usando una muestra de {n_samples} imágenes para UMAP...")
+        df_viz = df.sample(n=n_samples, random_state=42).copy()
+    else:
+        df_viz = df.copy()
+
+    # 2. Preparar datos (Matriz X y etiquetas y)
+    X = df_viz[pixel_cols].values
+    y = df_viz['category'].values
+    
+    print(f"Ejecutando UMAP en {len(X)} imágenes...")
+    
+    # 3. Ajuste del modelo UMAP
+    # random_state fijo para reproducibilidad (importante para tu tesis/trabajo)
+    reducer = umap.UMAP(n_neighbors=n_neighbors, min_dist=min_dist, random_state=42)
+    embedding = reducer.fit_transform(X)
+    
+    # 4. Crear DataFrame temporal para graficar
+    df_emb = pd.DataFrame(embedding, columns=['UMAP_1', 'UMAP_2'])
+    df_emb['Category'] = y
+    
+    # 5. Visualización
+    plt.figure(figsize=(10, 8))
+    sns.scatterplot(
+        data=df_emb, x='UMAP_1', y='UMAP_2', 
+        hue='Category', palette='viridis', s=10, alpha=0.6
+    )
+    
+    plt.title(f'Proyección UMAP', fontsize=14)
+    plt.xlabel('Dimensión UMAP 1')
+    plt.ylabel('Dimensión UMAP 2')
+    plt.legend(title='Categoría', markerscale=2)
+    plt.grid(True, linestyle='--', alpha=0.3)
+    
     plt.tight_layout()
     plt.show()
