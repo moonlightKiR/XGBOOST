@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import os
 import math
 import warnings
 import pandas as pd
@@ -9,11 +8,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import umap
 
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.model_selection import train_test_split
-from sklearn.feature_selection import mutual_info_classif
-from sklearn.decomposition import PCA
-from imblearn.over_sampling import SMOTE
 from scipy.ndimage import center_of_mass, shift
 from scipy.stats import f_oneway
 

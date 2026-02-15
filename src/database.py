@@ -30,7 +30,7 @@ def initialize_database():
     conn.close()
 
 def download_data():
-    categories = ['dragon', 'apple','cactus', 'bicycle','diamond'] #, 'banana', , 
+    categories = ['dragon', 'apple','cactus', 'bicycle','diamond']
     base_url = "https://storage.googleapis.com/quickdraw_dataset/full/numpy_bitmap/"
     
     if not os.path.exists(DOWNLOAD_DIR):
