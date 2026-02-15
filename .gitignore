@@ -1,0 +1,4 @@
+# Extensiones de Python y bases de datos
+*.pyc
+*.db
+*.npy
