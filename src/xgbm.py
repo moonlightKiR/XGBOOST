@@ -30,20 +30,28 @@ def train_model(X_train, y_train, X_test, y_test,
                 learning_rate=0.05,
                 subsample=0.8,
                 colsample_bytree=0.8,
+                min_child_weight=5,
+                gamma=0.5,
+                reg_alpha=0.5,
+                reg_lambda=1,
                 early_stopping_rounds=30):
-    
+
     model = XGBClassifier(
         n_estimators=n_estimators,
         max_depth=max_depth,
         learning_rate=learning_rate,
         subsample=subsample,
         colsample_bytree=colsample_bytree,
+        min_child_weight=min_child_weight,
+        gamma=gamma,
+        reg_alpha=reg_alpha,
+        reg_lambda=reg_lambda,
         tree_method="hist",
         random_state=42,
-        use_label_encoder=False,
         eval_metric="mlogloss",
         early_stopping_rounds=early_stopping_rounds
     )
+    
 
     # Entrenar con el eval_set en el fit
     model.fit(
