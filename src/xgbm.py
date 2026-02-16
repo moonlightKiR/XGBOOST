@@ -5,25 +5,27 @@ from xgboost import XGBClassifier
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report, accuracy_score
+import optuna
+from sklearn.model_selection import cross_val_score, StratifiedKFold
+from sklearn.datasets import load_iris
 
 def split_df(df):
-    X = df.filter(like="px_").values  # todas las columnas que contienen "px_"
+    X = df.filter(like="px_").values
     y = df["category"].values
     
-    # Separar datos
+    #separar en train y test con estratificación para mantener la proporción de clases
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
 
-    # Codificar etiquetas
+    #codificar las etiquetas de las clases
     le = LabelEncoder()
     y_train = le.fit_transform(y_train)
     y_test = le.transform(y_test)
     
-    return X_train, X_test, y_train, y_test
+    return X_train, X_test, y_train, y_test, le
 
-
-    # Modelo
+# Entrenamiento con early stopping manual
 def train_model(X_train, y_train, X_test, y_test,
                 n_estimators=400,
                 max_depth=5,
@@ -36,6 +38,9 @@ def train_model(X_train, y_train, X_test, y_test,
                 reg_lambda=1,
                 early_stopping_rounds=30):
 
+    num_class = len(np.unique(y_train))
+    
+    # Configurar el modelo con los hiperparámetros especificados
     model = XGBClassifier(
         n_estimators=n_estimators,
         max_depth=max_depth,
@@ -49,22 +54,22 @@ def train_model(X_train, y_train, X_test, y_test,
         tree_method="hist",
         random_state=42,
         eval_metric="mlogloss",
+        objective="multi:softprob",
+        num_class=num_class,
         early_stopping_rounds=early_stopping_rounds
     )
-    
 
-    # Entrenar con el eval_set en el fit
+    # Entrenar el modelo con early stopping 
     model.fit(
         X_train, y_train,
         eval_set=[(X_test, y_test)],
         verbose=False
     )
 
-    # Mejor número de iteraciones
+    # Obtener la mejor iteración según el early stopping
     best_iteration = model.best_iteration
     print(f"Early stopping alcanzado en iteración: {best_iteration}")
 
-    # Predicciones
     y_pred_train = model.predict(X_train)
     y_pred_test = model.predict(X_test)
 
@@ -73,8 +78,8 @@ def train_model(X_train, y_train, X_test, y_test,
     print("\nReporte (Test):")
     print(classification_report(y_test, y_pred_test))
 
+    return model, y_pred_train, y_pred_test, best_iteration
 
-    return model
 
 def run_grid_search(X_train, y_train, X_test, y_test):
     param_grid = {
@@ -120,3 +125,30 @@ def run_grid_search(X_train, y_train, X_test, y_test):
     print(classification_report(y_test, y_pred))
 
     return best_model
+
+
+    #optuna
+
+def objective(trial, X_train, y_train, X_test, y_test):
+    params = {
+        "n_estimators": trial.suggest_int("n_estimators", 100, 1000),
+        "max_depth": trial.suggest_int("max_depth", 3, 12),
+        "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
+        "subsample": trial.suggest_float("subsample", 0.5, 1.0),
+        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
+        "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
+        "gamma": trial.suggest_float("gamma", 0, 5),
+        "reg_alpha": trial.suggest_float("reg_alpha", 0, 5),
+        "reg_lambda": trial.suggest_float("reg_lambda", 0, 5),
+        "objective": "multi:softprob",
+        "num_class": len(set(y_train)),
+        "tree_method": "hist",
+        "random_state": 42,
+        "eval_metric": "mlogloss"
+    }
+
+    model = XGBClassifier(**params)
+    model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False, early_stopping_rounds=30)
+    y_pred = model.predict(X_test)
+    acc = accuracy_score(y_test, y_pred)
+    return acc
