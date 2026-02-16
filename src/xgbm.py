@@ -9,6 +9,11 @@ import optuna
 from sklearn.model_selection import cross_val_score, StratifiedKFold
 from sklearn.datasets import load_iris
 
+import optuna
+import pandas as pd
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+import matplotlib.pyplot as plt
+
 def split_df(df):
     X = df.filter(like="px_").values
     y = df["category"].values
@@ -152,3 +157,22 @@ def objective(trial, X_train, y_train, X_test, y_test):
     y_pred = model.predict(X_test)
     acc = accuracy_score(y_test, y_pred)
     return acc
+
+def optuna_study(df):
+
+    X_train, X_test, y_train, y_test, le = split_df(df)
+
+    # Crear estudio
+    study = optuna.create_study(direction="maximize")
+
+    # Optimizar usando lambda para pasar los datos
+    study.optimize(
+        lambda trial: xgbm.objective(trial, X_train, y_train, X_test, y_test),
+        n_trials=50
+    )
+
+    # Ver resultados
+    print("Mejores parámetros:", study.best_params)
+    print("Mejor Accuracy:", study.best_value)
+
+    return study
