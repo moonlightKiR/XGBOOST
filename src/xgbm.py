@@ -1,5 +1,5 @@
 # XGBoost Model
-iimport numpy as np
+import numpy as np
 import xgboost as xgb
 from xgboost import XGBClassifier
 from sklearn.model_selection import train_test_split, GridSearchCV
@@ -41,14 +41,14 @@ def train_model(X_train, y_train, X_test, y_test,
         tree_method="hist",
         random_state=42,
         use_label_encoder=False,
-        eval_metric="mlogloss"
+        eval_metric="mlogloss",
+        early_stopping_rounds=early_stopping_rounds
     )
 
-    # Entrenar con early stopping
+    # Entrenar con el eval_set en el fit
     model.fit(
         X_train, y_train,
         eval_set=[(X_test, y_test)],
-        early_stopping_rounds=early_stopping_rounds,
         verbose=False
     )
 
@@ -104,8 +104,8 @@ def run_grid_search(X_train, y_train, X_test, y_test):
 
     # Evaluación final con el mejor modelo
     best_model = grid_search.best_estimator_
-    best_model.fit(X_train, y_train, eval_set=[(X_test, y_test)],
-                   early_stopping_rounds=30, verbose=False)
+    best_model.set_params(early_stopping_rounds=30)
+    best_model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
 
     y_pred = best_model.predict(X_test)
     print("\nReporte de clasificación con el mejor modelo (Test Set):")
